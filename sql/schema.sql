@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS promotions (
   key text NOT NULL,
   title text NOT NULL,
   text text NOT NULL,
+  valid_from timestamptz,
+  valid_to timestamptz,
   expires_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (park_id, key)
@@ -206,6 +208,7 @@ CREATE TABLE IF NOT EXISTS park_published_state (
 
 CREATE TABLE IF NOT EXISTS change_log (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  park_id uuid,
   actor text NOT NULL,
   entity_table text NOT NULL,
   action text NOT NULL,
@@ -214,3 +217,5 @@ CREATE TABLE IF NOT EXISTS change_log (
   reason text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS change_log_park_created_idx ON change_log(park_id, created_at DESC);

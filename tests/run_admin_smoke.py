@@ -13,7 +13,7 @@ ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
 def _admin_headers() -> dict[str, str]:
     if not ADMIN_API_KEY:
         raise SystemExit("ADMIN_API_KEY env is required")
-    return {"X-Admin-Key": ADMIN_API_KEY, "X-Admin-Actor": "smoke"}
+    return {"X-Admin-Key": ADMIN_API_KEY}
 
 
 def main() -> int:
@@ -25,41 +25,37 @@ def main() -> int:
         return 2
 
     park_slug = "nn"
-    session_id = UUID("00000000-0000-0000-0000-000000000099")
+    session_id = UUID("00000000-0000-0000-0000-000000000101")
 
-    phone1 = "+7 (999) 000-00-01"
-    phone2 = "+7 (999) 000-00-02"
+    phone_old = "+7 (999) 000-00-11"
+    phone_new = "+7 (999) 000-00-22"
 
     def put_contacts(phone: str) -> None:
         rr = client.put(
             f"{API_URL}/v1/admin/parks/{park_slug}/contacts",
             headers=_admin_headers(),
             json={
-                "items": [
-                    {"type": "phone", "value": phone, "is_primary": True},
-                    {"type": "email", "value": "info@example.com", "is_primary": False},
-                ],
+                "items": [{"type": "phone", "value": phone, "is_primary": True}],
                 "reason": "smoke",
             },
         )
         rr.raise_for_status()
 
-    def publish() -> str:
+    def publish() -> None:
         rr = client.post(
             f"{API_URL}/v1/admin/parks/{park_slug}/publish",
             headers=_admin_headers(),
             json={"notes": "smoke"},
         )
         rr.raise_for_status()
-        return rr.json()["published_version_id"]
 
-    def rollback() -> str:
+    def rollback() -> None:
         rr = client.post(
             f"{API_URL}/v1/admin/parks/{park_slug}/rollback",
             headers=_admin_headers(),
+            json={"reason": "smoke"},
         )
         rr.raise_for_status()
-        return rr.json()["published_version_id"]
 
     def ask_phone() -> str:
         rr = client.post(
@@ -68,39 +64,42 @@ def main() -> int:
                 "park_slug": park_slug,
                 "channel": "smoke",
                 "session_id": str(session_id),
-                "message": "Подскажите телефон",
+                "message": "Какой у вас телефон?",
             },
         )
         rr.raise_for_status()
         return rr.json()["reply"]
 
-    put_contacts(phone1)
-    v1 = publish()
+    # publish old
+    put_contacts(phone_old)
+    publish()
 
-    put_contacts(phone2)
-    reply_after_live_change = ask_phone()
-    if phone2 in reply_after_live_change:
-        print("FAIL: reply used live facts while published snapshot is active")
-        print(reply_after_live_change)
+    # change live, but answer should stay old because snapshot is active
+    put_contacts(phone_new)
+    reply1 = ask_phone()
+    if phone_old not in reply1:
+        print("FAIL: expected snapshot phone_old")
+        print(reply1)
         return 2
-    if phone1 not in reply_after_live_change:
-        print("FAIL: reply does not contain snapshot phone1")
-        print(reply_after_live_change)
-        return 2
-
-    v2 = publish()
-    reply_v2 = ask_phone()
-    if phone2 not in reply_v2:
-        print("FAIL: reply does not contain snapshot phone2 after publishing v2")
-        print(reply_v2)
+    if phone_new in reply1:
+        print("FAIL: should not leak live phone_new while snapshot active")
+        print(reply1)
         return 2
 
-    rb = rollback()
-    reply_rb = ask_phone()
-    if phone1 not in reply_rb:
-        print("FAIL: rollback did not restore previous snapshot (expected phone1)")
-        print("rollback_to=", rb, "published_v1=", v1, "published_v2=", v2)
-        print(reply_rb)
+    # publish new
+    publish()
+    reply2 = ask_phone()
+    if phone_new not in reply2:
+        print("FAIL: expected snapshot phone_new after publish")
+        print(reply2)
+        return 2
+
+    # rollback to previous snapshot
+    rollback()
+    reply3 = ask_phone()
+    if phone_old not in reply3:
+        print("FAIL: expected phone_old after rollback")
+        print(reply3)
         return 2
 
     print("OK")
@@ -109,3 +108,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

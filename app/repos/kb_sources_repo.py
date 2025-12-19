@@ -91,6 +91,8 @@ class KBSourcesRepo:
         enabled: bool | None = None,
         expires_at: datetime | None = None,
         title: str | None = None,
+        source_url: str | None = None,
+        file_path: str | None = None,
     ) -> None:
         parts = []
         params: dict[str, Any] = {"id": source_id}
@@ -103,6 +105,12 @@ class KBSourcesRepo:
         if title is not None:
             parts.append("title = :title")
             params["title"] = title
+        if source_url is not None:
+            parts.append("source_url = :source_url")
+            params["source_url"] = source_url
+        if file_path is not None:
+            parts.append("file_path = :file_path")
+            params["file_path"] = file_path
         if not parts:
             return
         await self._session.execute(

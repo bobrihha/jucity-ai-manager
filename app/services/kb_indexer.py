@@ -34,9 +34,18 @@ class KBIndexer:
         self._embed = Embeddings()
         self._qdrant = QdrantClient()
 
-    async def run_reindex(self, *, park_id: UUID, park_slug: str, triggered_by: str | None, reason: str | None) -> UUID:
+    async def run_reindex(
+        self,
+        *,
+        park_id: UUID,
+        park_slug: str,
+        triggered_by: str | None,
+        reason: str | None,
+        existing_job_id: UUID | None = None,
+        enable_auto_activate: bool = True,
+    ) -> UUID:
         sources = await self._sources_repo.list_enabled_sources(park_id)
-        job_id = await self._jobs_repo.create_job(
+        job_id = existing_job_id or await self._jobs_repo.create_job(
             park_id=park_id,
             triggered_by=triggered_by,
             reason=reason,
@@ -116,7 +125,8 @@ class KBIndexer:
                 upsert_time_ms=upsert_ms,
             )
             await self._jobs_repo.set_job_success(job_id, stats_json=stats.__dict__)
-            await self._indexes_repo.activate_index(park_id=park_id, index_id=index_id)
+            if enable_auto_activate:
+                await self._indexes_repo.activate_index(park_id=park_id, index_id=index_id)
             return job_id
         except Exception as e:
             await self._jobs_repo.set_job_failed(job_id, error_text=str(e))

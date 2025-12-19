@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.repos.facts_versions_repo import FactsVersionsRepo
 
 @dataclass(frozen=True)
 class Park:
@@ -52,19 +53,11 @@ class FactsRepo:
         return Park(id=row["id"], slug=row["slug"], name=row["name"], base_url=row["base_url"])
 
     async def get_facts(self, park_id: UUID) -> FactsBundle:
-        published_version_id = await self.get_published_version_id(park_id)
+        published_version_id = await FactsVersionsRepo(self._session).get_published_version_id(park_id)
         if published_version_id:
-            snap = await self._fetch_one(
-                """
-                SELECT snapshot_json
-                FROM facts_snapshots
-                WHERE facts_version_id = :vid
-                LIMIT 1
-                """,
-                {"vid": published_version_id},
-            )
-            if snap and snap.get("snapshot_json"):
-                return self._bundle_from_snapshot(snap["snapshot_json"])
+            snap = await FactsVersionsRepo(self._session).get_snapshot_json(published_version_id)
+            if snap:
+                return self._bundle_from_snapshot(snap)
 
         return await self.get_live_facts(park_id)
 
@@ -131,7 +124,7 @@ class FactsRepo:
 
         promotions = await self._fetch_all(
             """
-            SELECT key, title, text, expires_at, created_at
+            SELECT key, title, text, valid_from, valid_to, expires_at, created_at
             FROM promotions
             WHERE park_id = :park_id
             ORDER BY created_at DESC
@@ -166,19 +159,7 @@ class FactsRepo:
         )
 
     async def get_published_version_id(self, park_id: UUID) -> UUID | None:
-        res = await self._session.execute(
-            text(
-                """
-                SELECT published_version_id
-                FROM park_published_state
-                WHERE park_id = :park_id
-                LIMIT 1
-                """
-            ),
-            {"park_id": park_id},
-        )
-        row = res.mappings().first()
-        return row["published_version_id"] if row else None
+        return await FactsVersionsRepo(self._session).get_published_version_id(park_id)
 
     async def get_page_url(self, park_id: UUID, key: str) -> str | None:
         park = await self._session.execute(
@@ -437,8 +418,8 @@ class FactsRepo:
             await self._session.execute(
                 text(
                     """
-                    INSERT INTO promotions (park_id, key, title, text, expires_at)
-                    VALUES (:park_id, :key, :title, :text, :expires_at)
+                    INSERT INTO promotions (park_id, key, title, text, valid_from, valid_to, expires_at)
+                    VALUES (:park_id, :key, :title, :text, :valid_from, :valid_to, :expires_at)
                     """
                 ),
                 {
@@ -446,6 +427,8 @@ class FactsRepo:
                     "key": p["key"],
                     "title": p["title"],
                     "text": p["text"],
+                    "valid_from": p.get("valid_from"),
+                    "valid_to": p.get("valid_to"),
                     "expires_at": p.get("expires_at"),
                 },
             )
@@ -471,6 +454,7 @@ class FactsRepo:
     async def write_change_log(
         self,
         *,
+        park_id: UUID | None,
         actor: str,
         entity_table: str,
         action: str,
@@ -497,11 +481,12 @@ class FactsRepo:
         await self._session.execute(
             text(
                 """
-                INSERT INTO change_log (actor, entity_table, action, before_json, after_json, reason)
-                VALUES (:actor, :entity_table, :action, CAST(:before AS jsonb), CAST(:after AS jsonb), :reason)
+                INSERT INTO change_log (park_id, actor, entity_table, action, before_json, after_json, reason)
+                VALUES (:park_id, :actor, :entity_table, :action, CAST(:before AS jsonb), CAST(:after AS jsonb), :reason)
                 """
             ),
             {
+                "park_id": park_id,
                 "actor": actor,
                 "entity_table": entity_table,
                 "action": action,

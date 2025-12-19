@@ -126,7 +126,7 @@ python scripts/baseline_from_db.py
 - `QDRANT_URL` — URL Qdrant (например, `http://localhost:6333`)
 - `RAG_ENABLED` — `true|false` (если `false`, бот работает без RAG)
 - `EMBEDDINGS_PROVIDER` — `local_hash` (по умолчанию)
-- `ADMIN_API_KEY` — ключ для Admin API (заголовок `X-Admin-API-Key`)
+- `ADMIN_API_KEY` — ключ для Admin API (заголовок `X-Admin-Key`)
 
 ---
 
@@ -180,28 +180,28 @@ LIMIT 20;
 
 ## 9) Admin API (MVP-3)
 
-Все эндпоинты ` /v1/admin/* ` защищены заголовком `X-Admin-API-Key` (значение = `ADMIN_API_KEY`).
+Все эндпоинты ` /v1/admin/* ` защищены заголовком `X-Admin-Key` (значение = `ADMIN_API_KEY`).
 
 Health:
 
 ```bash
-curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8000/v1/admin/health
+curl -H "X-Admin-Key: $ADMIN_API_KEY" http://localhost:8000/v1/admin/health
 ```
 
 Publish / rollback Facts:
 
 ```bash
-curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
+curl -X POST -H "X-Admin-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
   http://localhost:8000/v1/admin/parks/nn/publish -d '{"notes":"manual"}'
 
-curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" \
+curl -X POST -H "X-Admin-Key: $ADMIN_API_KEY" \
   http://localhost:8000/v1/admin/parks/nn/rollback
 ```
 
 Replace contacts:
 
 ```bash
-curl -X PUT -H "X-Admin-API-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
+curl -X PUT -H "X-Admin-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
   http://localhost:8000/v1/admin/parks/nn/contacts \
   -d '{"items":[{"type":"phone","value":"+7 (999) 000-00-00","is_primary":true}],"reason":"manual"}'
 ```
@@ -209,9 +209,9 @@ curl -X PUT -H "X-Admin-API-Key: $ADMIN_API_KEY" -H "Content-Type: application/j
 KB sources (list/create/patch):
 
 ```bash
-curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:8000/v1/admin/parks/nn/kb/sources
+curl -H "X-Admin-Key: $ADMIN_API_KEY" http://localhost:8000/v1/admin/parks/nn/kb/sources
 
-curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
+curl -X POST -H "X-Admin-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
   http://localhost:8000/v1/admin/parks/nn/kb/sources \
   -d '{"source_type":"url","source_url":"https://nn.jucity.ru/rules/","title":"Правила","enabled":true}'
 ```
@@ -220,4 +220,10 @@ Smoke publish/rollback:
 
 ```bash
 python scripts/smoke_publish_rollback.py
+```
+
+Smoke admin (MVP-3 publish/rollback flow):
+
+```bash
+python tests/run_admin_smoke.py
 ```
