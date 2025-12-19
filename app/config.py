@@ -20,5 +20,9 @@ class Settings:
 
         self.admin_api_key = os.getenv("ADMIN_API_KEY", "")
 
+        self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        self.telegram_admin_chat_ids = os.getenv("TELEGRAM_ADMIN_CHAT_IDS", "")
+        self.public_api_base_url = os.getenv("PUBLIC_API_BASE_URL", "")
+
 
 settings = Settings()

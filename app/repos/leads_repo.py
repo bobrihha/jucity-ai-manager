@@ -32,6 +32,7 @@ class Lead:
     conversation_json: list[dict[str, Any]]
     missing_required_slots: list[str]
     admin_message: str | None
+    admin_message_hash: str | None
 
 
 class LeadsRepo:
@@ -102,6 +103,26 @@ class LeadsRepo:
         row = res.mappings().one()
         return self._to_lead(row)
 
+    async def mark_admin_message_notified(self, lead_id: UUID, *, admin_message: str) -> bool:
+        import hashlib
+
+        msg_hash = hashlib.sha256(admin_message.encode("utf-8")).hexdigest()
+        res = await self._session.execute(
+            text(
+                """
+                UPDATE leads
+                SET admin_message_hash = :h,
+                    admin_message_last_notified_at = now(),
+                    updated_at = now()
+                WHERE id = :id
+                  AND (admin_message_hash IS DISTINCT FROM :h)
+                RETURNING id
+                """
+            ),
+            {"id": lead_id, "h": msg_hash},
+        )
+        return res.first() is not None
+
     async def upsert_lead_by_session(
         self,
         *,
@@ -162,6 +183,7 @@ class LeadsRepo:
             conversation_json=list(conv),
             missing_required_slots=list(miss),
             admin_message=row.get("admin_message"),
+            admin_message_hash=row.get("admin_message_hash"),
         )
 
 
@@ -208,4 +230,3 @@ def build_lead_summary(data: dict[str, Any]) -> str:
         parts.append("телефон есть")
 
     return ". ".join(parts) if parts else ""
-

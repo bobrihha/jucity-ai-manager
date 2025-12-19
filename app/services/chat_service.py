@@ -14,6 +14,7 @@ from app.repos.event_log_repo import EventLogRepo
 from app.repos.facts_repo import FactsRepo
 from app.repos.leads_repo import LeadsRepo, lead_to_dict
 from app.services.rag_service import RAGService
+from app.services.telegram_notifications import notify_admins_telegram
 from app.utils import mask_phones
 from app.config import settings
 
@@ -191,11 +192,16 @@ class ChatService:
                     event_name="handoff_created",
                     payload={
                         "lead_id": str(lead.id),
-                        "admin_message_preview": admin_message[:200],
+                        "admin_message_preview": mask_phones(admin_message)[:200],
                         "pii_masking_applied": True,
                     },
                     facts_version_id=published_version_id,
                 )
+
+                # Telegram admin notifications (deduped by admin_message hash on lead)
+                notified = await self._leads_repo.mark_admin_message_notified(lead.id, admin_message=admin_message)
+                if notified:
+                    await notify_admins_telegram(lead_id=str(lead.id), park_slug=ctx.park_slug, admin_message=admin_message)
 
         use_rag = should_use_rag(intent=route.intent, rag_enabled=settings.rag_enabled)
         if use_rag:

@@ -153,6 +153,9 @@ python scripts/baseline_from_db.py
 - `RAG_ENABLED` — `true|false` (если `false`, бот работает без RAG)
 - `EMBEDDINGS_PROVIDER` — `local_hash` (по умолчанию)
 - `ADMIN_API_KEY` — ключ для Admin API (заголовок `X-Admin-Key`)
+- `TELEGRAM_BOT_TOKEN` — токен Telegram бота
+- `TELEGRAM_ADMIN_CHAT_IDS` — chat_id админов через запятую (например `123,456`)
+- `PUBLIC_API_BASE_URL` — базовый URL API (опционально, для ссылок)
 
 ---
 
@@ -253,3 +256,18 @@ Smoke admin (MVP-3 publish/rollback flow):
 ```bash
 python tests/run_admin_smoke.py
 ```
+
+---
+
+## 10) Telegram бот (MVP-4)
+
+Запуск (long-polling, отдельным процессом, без uvicorn):
+
+```bash
+export TELEGRAM_BOT_TOKEN="..."
+export TELEGRAM_ADMIN_CHAT_IDS="123456789"
+export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
+python -m app.channels.telegram.bot
+```
+
+Уведомления админам отправляются автоматически при `handoff_created` (если настроены `TELEGRAM_BOT_TOKEN` и `TELEGRAM_ADMIN_CHAT_IDS`).

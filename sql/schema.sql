@@ -181,6 +181,8 @@ CREATE TABLE IF NOT EXISTS leads (
   missing_required_slots jsonb NOT NULL DEFAULT '[]'::jsonb,
 
   admin_message text
+  ,admin_message_hash text
+  ,admin_message_last_notified_at timestamptz
 );
 
 CREATE INDEX IF NOT EXISTS leads_session_id_idx ON leads(session_id);
