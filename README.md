@@ -19,6 +19,24 @@ MVP-0: бот отвечает по **Facts** (контакты/адрес/гр�
 docker compose up -d postgres
 ```
 
+Если Docker недоступен, можно поднять Postgres локально через Homebrew (macOS):
+
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
+```
+
+Создать/обновить пользователя `postgres` с паролем `postgres`:
+
+```bash
+psql -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='postgres';"
+# если роли нет:
+psql -d postgres -c "CREATE ROLE postgres WITH LOGIN SUPERUSER PASSWORD 'postgres';"
+# если роль есть:
+psql -d postgres -c "ALTER ROLE postgres WITH LOGIN SUPERUSER PASSWORD 'postgres';"
+```
+
 ### 2.1.1 Поднять Qdrant (для RAG)
 ```bash
 docker compose up -d qdrant
@@ -50,6 +68,14 @@ docker compose exec postgres psql -U postgres -d postgres -f /sql/seed_nn.sql
 > См. `docker-compose.yml`.
 >
 > Если менялась схема, проще всего пересоздать volume: `docker compose down -v` и снова `up`.
+
+Вариант без Docker (локальный Postgres):
+
+```bash
+export PGPASSWORD=postgres
+psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f sql/schema.sql
+psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -f sql/seed_nn.sql
+```
 
 ### 2.3 Запустить API
 
