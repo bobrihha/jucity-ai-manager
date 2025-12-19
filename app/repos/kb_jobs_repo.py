@@ -4,8 +4,13 @@ import json
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+class KBJobAlreadyActiveError(RuntimeError):
+    pass
 
 
 class KBJobsRepo:
@@ -20,22 +25,27 @@ class KBJobsRepo:
         reason: str | None,
         sources_json: list[dict[str, Any]],
     ) -> UUID:
-        res = await self._session.execute(
-            text(
-                """
-                INSERT INTO kb_index_jobs (park_id, status, triggered_by, reason, sources_json)
-                VALUES (:park_id, 'queued', :triggered_by, :reason, CAST(:sources_json AS jsonb))
-                RETURNING id
-                """
-            ),
-            {
-                "park_id": park_id,
-                "triggered_by": triggered_by,
-                "reason": reason,
-                "sources_json": json.dumps(sources_json, ensure_ascii=False),
-            },
-        )
-        return res.scalar_one()
+        try:
+            res = await self._session.execute(
+                text(
+                    """
+                    INSERT INTO kb_index_jobs (park_id, status, triggered_by, reason, sources_json)
+                    VALUES (:park_id, 'queued', :triggered_by, :reason, CAST(:sources_json AS jsonb))
+                    RETURNING id
+                    """
+                ),
+                {
+                    "park_id": park_id,
+                    "triggered_by": triggered_by,
+                    "reason": reason,
+                    "sources_json": json.dumps(sources_json, ensure_ascii=False),
+                },
+            )
+            return res.scalar_one()
+        except IntegrityError as e:
+            if "kb_index_jobs_one_active_per_park_idx" in str(e):
+                raise KBJobAlreadyActiveError("kb_index_job already queued/running for this park") from e
+            raise
 
     async def set_job_running(self, job_id: UUID) -> None:
         await self._session.execute(
@@ -73,8 +83,8 @@ class KBJobsRepo:
                 """
                 SELECT id
                 FROM kb_index_jobs
-                WHERE park_id = :park_id AND status = 'running'
-                ORDER BY started_at DESC NULLS LAST, created_at DESC
+                WHERE park_id = :park_id AND status IN ('running', 'queued')
+                ORDER BY created_at DESC
                 LIMIT 1
                 """
             ),

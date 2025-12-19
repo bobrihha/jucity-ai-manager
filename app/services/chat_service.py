@@ -396,6 +396,8 @@ def should_use_rag(*, intent: str, rag_enabled: bool) -> bool:
 def apply_guardrails(*, reply: str, intent: str, rag_used: bool) -> tuple[str, bool, bool]:
     import re
 
+    from app.domain.patterns import MONEY_WITH_CURRENCY_RE
+
     if not rag_used:
         return reply, False, False
 
@@ -406,9 +408,8 @@ def apply_guardrails(*, reply: str, intent: str, rag_used: bool) -> tuple[str, b
         return cleaned, True, True
 
     # Soft filter: if answer contains currency markers, mask amounts.
-    money_re = re.compile(r"(\\b\\d[\\d\\s]*(?:[.,]\\d+)?\\s*(?:₽|руб\\.?|р\\.|рублей|рубля)\\b)", re.IGNORECASE)
-    if money_re.search(reply):
-        cleaned = money_re.sub("—", reply)
+    if MONEY_WITH_CURRENCY_RE.search(reply):
+        cleaned = MONEY_WITH_CURRENCY_RE.sub("—", reply)
         return cleaned, True, True
 
     return reply, False, False

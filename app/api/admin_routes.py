@@ -11,7 +11,7 @@ from app.api.admin_deps import get_admin_actor, verify_admin_key
 from app.db import get_session
 from app.repos.facts_repo import FactsRepo
 from app.repos.kb_indexes_repo import KBIndexesRepo
-from app.repos.kb_jobs_repo import KBJobsRepo
+from app.repos.kb_jobs_repo import KBJobAlreadyActiveError, KBJobsRepo
 from app.repos.kb_sources_repo import KBSourcesRepo
 from app.services.governance_service import GovernanceService
 from app.services.kb_indexer import KBIndexer
@@ -51,11 +51,16 @@ async def publish_facts(
     return PublishResponse(published_version_id=version_id)
 
 
+class RollbackRequest(BaseModel):
+    reason: str | None = None
+
+
 @router.post("/parks/{park_slug}/rollback", response_model=PublishResponse)
 async def rollback_facts(
     park_slug: str,
     actor: Annotated[str, Depends(get_admin_actor)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    payload: RollbackRequest | None = None,
 ) -> PublishResponse:
     facts_repo = FactsRepo(session)
     park = await facts_repo.get_park_by_slug(park_slug)
@@ -63,7 +68,8 @@ async def rollback_facts(
         raise HTTPException(status_code=404, detail="park not found")
     gov = GovernanceService(session)
     try:
-        version_id = await gov.rollback_snapshot(park_id=park.id, actor=actor, reason=None)
+        payload = payload or RollbackRequest()
+        version_id = await gov.rollback_snapshot(park_id=park.id, actor=actor, reason=payload.reason)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     await session.commit()
@@ -214,7 +220,7 @@ async def put_contacts(
     await facts_repo.replace_contacts(park.id, contacts)
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="park_contacts",
         action="replace",
         before_json=before,
@@ -240,7 +246,7 @@ async def put_location(
     await facts_repo.replace_location(park.id, payload.model_dump())
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="park_locations",
         action="replace",
         before_json=before,
@@ -271,7 +277,7 @@ async def put_opening_hours(
     await facts_repo.replace_opening_hours(park.id, hours)
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="park_opening_hours",
         action="replace",
         before_json=before,
@@ -298,7 +304,7 @@ async def put_transport(
     await facts_repo.replace_transport(park.id, items)
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="park_transport",
         action="replace",
         before_json=before,
@@ -325,7 +331,7 @@ async def put_site_pages(
     await facts_repo.replace_site_pages(park.id, items)
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="site_pages",
         action="replace",
         before_json=before,
@@ -352,7 +358,7 @@ async def put_legal_documents(
     await facts_repo.replace_legal_documents(park.id, items)
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="legal_documents",
         action="replace",
         before_json=before,
@@ -381,7 +387,7 @@ async def put_promotions(
     await facts_repo.replace_promotions(park.id, items)
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="promotions",
         action="replace",
         before_json=before,
@@ -408,7 +414,7 @@ async def put_faq(
     await facts_repo.replace_faq(park.id, items)
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="faq",
         action="replace",
         before_json=before,
@@ -473,7 +479,7 @@ async def kb_create_source(
     )
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="kb_sources",
         action="upsert",
         before_json=None,
@@ -514,7 +520,7 @@ async def kb_patch_source(
     after = (await repo.get_source(source_id)).__dict__
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="kb_sources",
         action="patch",
         before_json=before,
@@ -549,15 +555,24 @@ async def kb_reindex(
 
     payload = payload or KBReindexRequest()
     sources = await KBSourcesRepo(session).list_enabled_sources(park.id)
-    job_id = await jobs_repo.create_job(
-        park_id=park.id,
-        triggered_by=actor,
-        reason=payload.reason,
-        sources_json=[
-            {"id": str(s.id), "source_type": s.source_type, "source_url": s.source_url, "file_path": s.file_path, "title": s.title}
-            for s in sources
-        ],
-    )
+    try:
+        job_id = await jobs_repo.create_job(
+            park_id=park.id,
+            triggered_by=actor,
+            reason=payload.reason,
+            sources_json=[
+                {
+                    "id": str(s.id),
+                    "source_type": s.source_type,
+                    "source_url": s.source_url,
+                    "file_path": s.file_path,
+                    "title": s.title,
+                }
+                for s in sources
+            ],
+        )
+    except KBJobAlreadyActiveError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     await session.commit()
 
     from app.db import SessionLocal
@@ -622,7 +637,7 @@ async def kb_activate_index(
     await KBIndexesRepo(session).activate_index(park_id=park.id, index_id=idx)
     await facts_repo.write_change_log(
         park_id=park.id,
-        actor="admin_api",
+        actor=actor,
         entity_table="kb_indexes",
         action="activate",
         before_json=None,

@@ -4,17 +4,18 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, time
 
+from app.domain.patterns import (
+    AGE_RE,
+    DATE_DDMM_RE,
+    DATE_DD_MONTH_RE,
+    EXTRACT_PHONE_RE,
+    KIDS_COUNT_RE,
+    NAS_COUNT_RE,
+    TIME_HHMM_RE,
+    TIME_WORD_DAY_RE,
+)
 from app.utils import normalize_text
 
-
-_PHONE_RE = re.compile(r"(?P<num>(?:\\+?\\d)[\\d\\s\\-()]{6,}\\d)")
-_TIME_HHMM_RE = re.compile(r"(?P<h>\\d{1,2})[:.](?P<m>\\d{2})")
-_DATE_DDMM_RE = re.compile(r"(?P<d>\\d{1,2})[./](?P<m>\\d{1,2})(?:[./](?P<y>\\d{2,4}))?")
-_DATE_DD_MONTH_RE = re.compile(
-    r"(?P<d>\\d{1,2})\\s*(?P<mon>январ[яь]|феврал[яь]|март[а]?|апрел[яь]|ма[йя]|июн[яь]|июл[яь]|август[а]?|сентябр[яь]|октябр[яь]|ноябр[яь]|декабр[яь])"
-)
-_KIDS_COUNT_RE = re.compile(r"(?P<n>\\d{1,2})\\s*(?:дет|реб[её]н|ребят|чел\\.?\\b)")
-_AGE_RE = re.compile(r"(?P<n>\\d{1,2})\\s*(?:лет|года|год|л\\b)")
 
 
 _MONTHS = {
@@ -44,11 +45,11 @@ class SlotsPatch:
 
 
 def extract_phone(text: str) -> str | None:
-    m = _PHONE_RE.search(text)
+    m = EXTRACT_PHONE_RE.search(text)
     if not m:
         return None
     raw = m.group("num")
-    digits = re.sub(r"\\D", "", raw)
+    digits = re.sub(r"\D", "", raw)
     if not digits:
         return None
     if digits.startswith("8") and len(digits) == 11:
@@ -61,7 +62,7 @@ def extract_phone(text: str) -> str | None:
 
 
 def mask_phone(phone: str) -> str:
-    digits = re.sub(r"\\D", "", phone)
+    digits = re.sub(r"\D", "", phone)
     if len(digits) < 4:
         return phone
     keep_last = digits[-2:]
@@ -72,12 +73,12 @@ def mask_phone(phone: str) -> str:
 
 def extract_kids_count(text: str, *, party_context: bool) -> int | None:
     t = normalize_text(text)
-    m = _KIDS_COUNT_RE.search(t)
+    m = KIDS_COUNT_RE.search(t)
     if m:
         n = int(m.group("n"))
         return n if 0 < n < 100 else None
     if party_context:
-        m2 = re.search(r"\\bнас\\s+(?P<n>\\d{1,2})\\b", t)
+        m2 = NAS_COUNT_RE.search(t)
         if m2:
             n = int(m2.group("n"))
             return n if 0 < n < 100 else None
@@ -86,7 +87,7 @@ def extract_kids_count(text: str, *, party_context: bool) -> int | None:
 
 def extract_age(text: str) -> int | None:
     t = normalize_text(text)
-    m = _AGE_RE.search(t)
+    m = AGE_RE.search(t)
     if not m:
         return None
     n = int(m.group("n"))
@@ -97,7 +98,7 @@ def extract_date(text: str) -> tuple[date | None, int | None]:
     t = normalize_text(text)
     today = date.today()
 
-    m = _DATE_DDMM_RE.search(t)
+    m = DATE_DDMM_RE.search(t)
     if m:
         d = int(m.group("d"))
         mon = int(m.group("m"))
@@ -112,7 +113,7 @@ def extract_date(text: str) -> tuple[date | None, int | None]:
         except ValueError:
             return None, None
 
-    m2 = _DATE_DD_MONTH_RE.search(t)
+    m2 = DATE_DD_MONTH_RE.search(t)
     if m2:
         d = int(m2.group("d"))
         mon_token = m2.group("mon")
@@ -154,14 +155,14 @@ def extract_day_of_week(text_norm: str) -> int | None:
 
 def extract_time(text: str) -> time | None:
     t = normalize_text(text)
-    m = _TIME_HHMM_RE.search(t)
+    m = TIME_HHMM_RE.search(t)
     if m:
         h = int(m.group("h"))
         mi = int(m.group("m"))
         if 0 <= h <= 23 and 0 <= mi <= 59:
             return time(h, mi)
 
-    m2 = re.search(r"\\bв\\s*(?P<h>\\d{1,2})\\s*дня\\b", t)
+    m2 = TIME_WORD_DAY_RE.search(t)
     if m2:
         h = int(m2.group("h"))
         if 1 <= h <= 11:
@@ -204,4 +205,3 @@ def merge_slots(existing: dict, patch: SlotsPatch) -> dict:
         if out.get(key) in (None, "", 0):
             out[key] = val
     return out
-

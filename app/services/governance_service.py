@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timezone
 from typing import Any
 from uuid import UUID
@@ -33,7 +34,7 @@ class GovernanceService:
         return _jsonable(snapshot)
 
     async def publish_facts(self, *, park_id: UUID, published_by: str, notes: str | None) -> UUID:
-        async with self._session.begin():
+        async with _maybe_transaction(self._session):
             snapshot = await self.build_facts_snapshot(park_id)
             now = datetime.now(timezone.utc)
             res = await self._session.execute(
@@ -74,10 +75,10 @@ class GovernanceService:
             return version_id
 
     async def rollback_facts(self, *, park_id: UUID, rolled_back_by: str) -> UUID:
-        async with self._session.begin():
+        async with _maybe_transaction(self._session):
             current = await self._facts.get_published_version_id(park_id)
             if not current:
-                raise ValueError("No published version to rollback")
+                raise ValueError("No published version")
 
             res = await self._session.execute(
                 text(
@@ -95,7 +96,7 @@ class GovernanceService:
             )
             row = res.mappings().first()
             if not row:
-                raise ValueError("No previous published version to rollback to")
+                raise ValueError("No previous published version")
             prev: UUID = row["id"]
 
             await self._session.execute(
@@ -127,3 +128,12 @@ def _jsonable(obj: Any) -> Any:
     if isinstance(obj, (list, tuple)):
         return [_jsonable(v) for v in obj]
     return str(obj)
+
+
+@asynccontextmanager
+async def _maybe_transaction(session: AsyncSession):
+    if session.in_transaction():
+        yield
+        return
+    async with session.begin():
+        yield

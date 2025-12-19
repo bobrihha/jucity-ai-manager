@@ -214,21 +214,10 @@ class Composer:
         return "\n".join(parts[:2])
 
     def _restaurant_safe(self, text: str) -> str:
-        import re
+        from app.domain.patterns import MONEY_WITH_CURRENCY_RE, PRICE_WORD_NUMBER_RE
 
-        # Never enumerate prices for restaurant: strip currency/price patterns, but keep other numbers (hours/ages/etc).
-        text = re.sub(
-            r"\\b\\d[\\d\\s]*(?:[.,]\\d+)?\\s*(?:₽|руб\\.?|р\\.|рублей|рубля)\\b",
-            "—",
-            text,
-            flags=re.IGNORECASE,
-        )
-        text = re.sub(
-            r"\\b(?:цена|стоимость)\\s*(?:от\\s*)?\\d[\\d\\s]*(?:[.,]\\d+)?\\b",
-            "цена —",
-            text,
-            flags=re.IGNORECASE,
-        )
+        text = MONEY_WITH_CURRENCY_RE.sub("—", text)
+        text = PRICE_WORD_NUMBER_RE.sub("цена —", text)
         tail = "Меню на сайте носит информационный характер (не оферта); точные цены и состав уточняются у администратора."
         if tail.lower() in text.lower():
             return text

@@ -146,6 +146,9 @@ CREATE TABLE IF NOT EXISTS kb_index_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS kb_index_jobs_park_created_idx ON kb_index_jobs(park_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS kb_index_jobs_one_active_per_park_idx
+  ON kb_index_jobs(park_id)
+  WHERE status IN ('queued','running');
 
 CREATE TABLE IF NOT EXISTS leads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

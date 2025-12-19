@@ -18,4 +18,4 @@ def verify_admin_key(
 
 
 def get_admin_actor(x_admin_actor: str | None = Header(default=None)) -> str:
-    return x_admin_actor or "admin"
+    return x_admin_actor or "admin_api"
