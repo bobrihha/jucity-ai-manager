@@ -32,8 +32,8 @@ class Settings:
 
         self.llm_mode = os.getenv("LLM_MODE", "classic").strip().lower()  # classic|planner
         self.llm_planner_provider = os.getenv("LLM_PLANNER_PROVIDER", "mock").strip().lower()  # mock|openai
-        self.llm_planner_api_key = os.getenv("LLM_PLANNER_API_KEY", "").strip()
-        self.llm_planner_model = os.getenv("LLM_PLANNER_MODEL", "").strip()
+        self.llm_planner_api_key = (os.getenv("LLM_PLANNER_API_KEY", "").strip() or self.llm_api_key)
+        self.llm_planner_model = (os.getenv("LLM_PLANNER_MODEL", "").strip() or self.llm_model)
 
 
 settings = Settings()

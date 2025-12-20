@@ -9,6 +9,15 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
+# Make test suite deterministic/offline regardless of local `.env`.
+# (We can still enable planner explicitly inside specific tests via monkeypatch.)
+os.environ.setdefault("LLM_MODE", "classic")
+os.environ.setdefault("LLM_PLANNER_PROVIDER", "mock")
+os.environ.setdefault("LLM_PLANNER_API_KEY", "")
+os.environ.setdefault("LLM_PLANNER_MODEL", "")
+os.environ.setdefault("LLM_ENABLED", "false")
+os.environ.setdefault("LLM_PROVIDER", "mock")
+
 
 def _database_url() -> str:
     return os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres")
@@ -52,4 +61,3 @@ async def test_park(db_session: AsyncSession) -> dict:
     )
     await db_session.commit()
     return {"id": park_id, "slug": slug}
-
