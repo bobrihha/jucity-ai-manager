@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from uuid import UUID, uuid5
 
 from aiogram import F, Router
@@ -24,6 +25,7 @@ async def on_text_message(message: Message) -> None:
 
     telegram_user_id = message.from_user.id if message.from_user else 0
     park_slug = "nn"
+    logging.info("telegram.incoming user_id=%s text_len=%s", telegram_user_id, len(message.text))
 
     req = ChatMessageRequest(
         park_slug=park_slug,
@@ -33,9 +35,13 @@ async def on_text_message(message: Message) -> None:
         message=message.text,
     )
 
-    async with SessionLocal() as session:
-        resp = await ChatService(session=session).handle_message(req)
-        await session.commit()
+    try:
+        async with SessionLocal() as session:
+            resp = await ChatService(session=session).handle_message(req)
+            await session.commit()
+    except Exception:
+        logging.exception("telegram.handler_failed user_id=%s", telegram_user_id)
+        await message.answer("Сервис сейчас недоступен. Попробуйте ещё раз через минуту.")
+        return
 
     await message.answer(resp.reply)
-

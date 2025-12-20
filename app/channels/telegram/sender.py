@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from dotenv import load_dotenv
 
 def _parse_admin_chat_ids(raw: str) -> list[int]:
     ids: list[int] = []
@@ -21,6 +22,7 @@ class TelegramConfig:
 
 
 def telegram_config_from_env() -> TelegramConfig | None:
+    load_dotenv(override=False)
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     ids_raw = os.getenv("TELEGRAM_ADMIN_CHAT_IDS", "").strip()
     if not token or not ids_raw:
@@ -41,4 +43,3 @@ async def send_admin_notification(text: str) -> None:
             await bot.send_message(chat_id=chat_id, text=text)
     finally:
         await bot.session.close()
-
