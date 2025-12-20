@@ -17,6 +17,9 @@ from app.repos.leads_repo import LeadsRepo, lead_to_dict
 from app.repos.user_profiles_repo import UserProfilesRepo
 from app.services.rag_service import RAGService
 from app.services.llm_service import render_text as llm_render_text
+from app.services.llm_planner_service import PlannerResult, run_planner
+from app.services.planner_guard import validate_planner_output
+from app.services.planner_tools import execute_tool
 from app.services.telegram_notifications import notify_admins_telegram
 from app.utils import mask_phones
 from app.config import settings
@@ -98,6 +101,16 @@ class ChatService:
             payload={"message": mask_phones(req.message)},
             facts_version_id=published_version_id,
         )
+
+        if settings.llm_mode == "planner":
+            planner_resp = await self._handle_message_planner(
+                ctx=ctx,
+                req=req,
+                published_version_id=published_version_id,
+            )
+            if planner_resp is not None:
+                await self._session.commit()
+                return planner_resp
 
         route = self._router.route(req.message)
         await self._event_log.write_event(
@@ -414,6 +427,131 @@ class ChatService:
             session_id=ctx.session_id,
             trace_id=ctx.trace_id,
         )
+
+    async def _handle_message_planner(
+        self,
+        *,
+        ctx: ChatContext,
+        req: ChatMessageRequest,
+        published_version_id: UUID | None,
+    ) -> ChatMessageResponse | None:
+        try:
+            # 2-step planner: first may request tools, second generates final answer with tool results.
+            tool_results: dict[str, dict] = {}
+            first: PlannerResult = await run_planner(
+                user_message=mask_phones(req.message),
+                channel=ctx.channel,
+                park_slug=ctx.park_slug,
+                session_id=str(ctx.session_id),
+                user_id=ctx.user_id,
+                tool_results=None,
+            )
+
+            await self._event_log.write_event(
+                trace_id=ctx.trace_id,
+                session_id=ctx.session_id,
+                user_id=ctx.user_id,
+                park_id=ctx.park_id,
+                park_slug=ctx.park_slug,
+                channel=ctx.channel,
+                event_name="planner_routed",
+                payload={
+                    "provider": first.provider,
+                    "model": first.model,
+                    "latency_ms": first.latency_ms,
+                    "intent": first.output.intent,
+                    "mode": first.output.mode,
+                    "tool_calls": [tc.name for tc in first.output.tool_calls],
+                },
+                facts_version_id=published_version_id,
+            )
+
+            # Execute requested tools (0..2)
+            for tc in first.output.tool_calls[:2]:
+                r = await execute_tool(
+                    session=self._session,
+                    tool_name=tc.name,
+                    args=tc.args,
+                    park_id=ctx.park_id,
+                    park_slug=ctx.park_slug,
+                    session_id=ctx.session_id,
+                )
+                tool_results[tc.name] = r.result
+                await self._event_log.write_event(
+                    trace_id=ctx.trace_id,
+                    session_id=ctx.session_id,
+                    user_id=ctx.user_id,
+                    park_id=ctx.park_id,
+                    park_slug=ctx.park_slug,
+                    channel=ctx.channel,
+                    event_name="planner_tool_called",
+                    payload={"tool": tc.name, "ok": r.ok},
+                    facts_version_id=published_version_id,
+                )
+
+            final = first
+            if tool_results:
+                final = await run_planner(
+                    user_message=mask_phones(req.message),
+                    channel=ctx.channel,
+                    park_slug=ctx.park_slug,
+                    session_id=str(ctx.session_id),
+                    user_id=ctx.user_id,
+                    tool_results=tool_results,
+                )
+
+            reply_text = final.output.reply
+            if final.output.questions:
+                reply_text = reply_text + "\n" + "\n".join(final.output.questions[:2])
+            if final.output.link:
+                reply_text = reply_text + "\n" + final.output.link
+
+            ok, issues = validate_planner_output(reply_text, link=final.output.link, questions=final.output.questions)
+            if not ok:
+                await self._event_log.write_event(
+                    trace_id=ctx.trace_id,
+                    session_id=ctx.session_id,
+                    user_id=ctx.user_id,
+                    park_id=ctx.park_id,
+                    park_slug=ctx.park_slug,
+                    channel=ctx.channel,
+                    event_name="planner_failed",
+                    payload={"issues": issues},
+                    facts_version_id=published_version_id,
+                )
+                return None
+
+            await self._event_log.write_event(
+                trace_id=ctx.trace_id,
+                session_id=ctx.session_id,
+                user_id=ctx.user_id,
+                park_id=ctx.park_id,
+                park_slug=ctx.park_slug,
+                channel=ctx.channel,
+                event_name="planner_answered",
+                payload={
+                    "intent": final.output.intent,
+                    "mode": final.output.mode,
+                    "questions": final.output.questions[:2],
+                    "link": final.output.link,
+                },
+                facts_version_id=published_version_id,
+            )
+
+            return ChatMessageResponse(reply=reply_text, session_id=ctx.session_id, trace_id=ctx.trace_id)
+        except Exception as e:
+            await self._event_log.write_event(
+                trace_id=ctx.trace_id,
+                session_id=ctx.session_id,
+                user_id=ctx.user_id,
+                park_id=ctx.park_id,
+                park_slug=ctx.park_slug,
+                channel=ctx.channel,
+                event_name="planner_failed",
+                payload={"error": str(e)},
+                facts_version_id=published_version_id,
+            )
+            return None
 
 
 def compute_missing_slots(

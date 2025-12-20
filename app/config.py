@@ -30,5 +30,10 @@ class Settings:
         self.llm_model = os.getenv("LLM_MODEL", "").strip()
         self.brand_voice = os.getenv("BRAND_VOICE", "jucity_nn").strip()
 
+        self.llm_mode = os.getenv("LLM_MODE", "classic").strip().lower()  # classic|planner
+        self.llm_planner_provider = os.getenv("LLM_PLANNER_PROVIDER", "mock").strip().lower()  # mock|openai
+        self.llm_planner_api_key = os.getenv("LLM_PLANNER_API_KEY", "").strip()
+        self.llm_planner_model = os.getenv("LLM_PLANNER_MODEL", "").strip()
+
 
 settings = Settings()
