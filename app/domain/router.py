@@ -17,6 +17,8 @@ class RouteResult:
 
 class Router:
     def route(self, message: str) -> RouteResult:
+        raw = (message or "").strip()
+        raw_lower = raw.lower()
         text = normalize_text(message)
 
         def has_any(*needles: str) -> bool:
@@ -26,7 +28,13 @@ class Router:
         link_intent: str | None = None
         required_slots: list[str] = []
 
-        if has_any(
+        if raw_lower == "/help" or raw_lower.startswith("/start"):
+            intent = "start"
+
+        elif has_any("в смысле", "не понял", "что?", "чего", "поясни") or "??" in raw:
+            intent = "clarify"
+
+        elif has_any(
             "контакт",
             "телефон",
             "адрес",
@@ -90,15 +98,18 @@ class Router:
         elif intent == "handoff":
             mode = "handoff_mode"
             required_slots = ["client_phone"]
+        elif intent in {"start", "clarify"}:
+            mode = "consult_mode"
         elif intent == "rules":
             mode = "legal_mode"
         else:
             mode = "consult_mode"
 
+        confidence = 1.0 if intent in {"start", "clarify"} else 0.7
         return RouteResult(
             intent=intent,
             mode=mode,
-            confidence=0.7,
+            confidence=confidence,
             questions=[],
             link_intent=link_intent,
             required_slots=required_slots,

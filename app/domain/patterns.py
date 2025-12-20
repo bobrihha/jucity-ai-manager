@@ -20,7 +20,7 @@ NAS_COUNT_RE = re.compile(r"\bнас\s+(?P<n>\d{1,2})\b")
 TIME_WORD_DAY_RE = re.compile(r"\bв\s*(?P<h>\d{1,2})\s*дня\b")
 
 MONEY_WITH_CURRENCY_RE = re.compile(
-    r"\b\d[\d\s]*(?:[.,]\d+)?\s*(?:₽|руб\.?|р\.|рублей|рубля)\b",
+    r"\b\d[\d\s]*(?:[.,]\d+)?\s*(?:₽|руб\.?|р\.|рублей|рубля)(?!\w)",
     re.IGNORECASE,
 )
 

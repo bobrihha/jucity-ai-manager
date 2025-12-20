@@ -23,6 +23,33 @@ async def on_text_message(message: Message) -> None:
     if not message.text:
         return
 
+    text_raw = message.text.strip()
+    text_lower = text_raw.lower()
+
+    if text_lower.startswith("/whoami"):
+        await message.answer(f"Твой chat_id: {message.chat.id}")
+        return
+
+    if text_lower == "/help" or text_lower.startswith("/start"):
+        await message.answer(
+            "Привет! Я Джуси — помощник парка «Джунгли Сити» 🐒🌴\n"
+            "Могу подсказать:\n"
+            "• адрес и как добраться\n"
+            "• график работы\n"
+            "• цены и билеты\n"
+            "• дни рождения/выпускные\n"
+            "• ресторан и меню\n"
+            "• правила посещения\n"
+            "\n"
+            "Напиши просто вопрос, например:\n"
+            "«Как до вас добраться?»\n"
+            "«Сколько стоит билет?»\n"
+            "«Хочу день рождения на 15 января, 8 детей по 6 лет»\n"
+            "\n"
+            "С чего начнём? 🙂"
+        )
+        return
+
     telegram_user_id = message.from_user.id if message.from_user else 0
     park_slug = "nn"
     logging.info("telegram.incoming user_id=%s text_len=%s", telegram_user_id, len(message.text))
@@ -32,7 +59,7 @@ async def on_text_message(message: Message) -> None:
         channel="telegram",
         session_id=_telegram_session_id(telegram_user_id, park_slug=park_slug),
         user_id=str(telegram_user_id),
-        message=message.text,
+        message=text_raw,
     )
 
     try:
