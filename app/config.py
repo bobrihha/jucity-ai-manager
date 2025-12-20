@@ -24,5 +24,11 @@ class Settings:
         self.telegram_admin_chat_ids = os.getenv("TELEGRAM_ADMIN_CHAT_IDS", "")
         self.public_api_base_url = os.getenv("PUBLIC_API_BASE_URL", "")
 
+        self.llm_enabled = os.getenv("LLM_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+        self.llm_provider = os.getenv("LLM_PROVIDER", "mock").strip().lower()
+        self.llm_api_key = os.getenv("LLM_API_KEY", "").strip()
+        self.llm_model = os.getenv("LLM_MODEL", "").strip()
+        self.brand_voice = os.getenv("BRAND_VOICE", "jucity_nn").strip()
+
 
 settings = Settings()

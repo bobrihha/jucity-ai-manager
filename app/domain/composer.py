@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from app.repos.facts_repo import FactsBundle
 from app.repos.leads_repo import Lead
@@ -53,65 +54,95 @@ class Composer:
         admin_message: str | None = None,
         rag_chunks: list[RetrievedChunk] | None = None,
     ) -> ComposedAnswer:
-        questions: list[str] = []
-        text = ""
+        plan = self.build_plan(
+            intent=intent,
+            facts=facts,
+            link_url=link_url,
+            user_message=user_message,
+            lead=lead,
+            missing_slots=missing_slots,
+            handoff_created=handoff_created,
+            admin_message=admin_message,
+            rag_chunks=rag_chunks,
+        )
+        reply = self.render_from_plan(plan)
         rag_used = bool(rag_chunks)
 
+        return ComposedAnswer(
+            reply=reply,
+            questions=list(plan.get("questions") or [])[:2],
+            link_url=link_url,
+            admin_message=admin_message,
+            rag_used=rag_used,
+        )
+
+    def build_plan(
+        self,
+        *,
+        intent: str,
+        facts: FactsBundle,
+        link_url: str | None,
+        user_message: str,
+        lead: Lead | None = None,
+        missing_slots: list[str] | None = None,
+        handoff_created: bool = False,
+        admin_message: str | None = None,
+        rag_chunks: list[RetrievedChunk] | None = None,
+    ) -> dict[str, Any]:
+        questions: list[str] = []
+        answer_points: list[str] = []
+
+        rag_snippets: list[str] = []
+        if rag_chunks:
+            rag_snippets = self._snippets_from_chunks(rag_chunks)
+
+        facts_payload: dict[str, Any] = {}
+
         if intent == "start":
-            text = (
-                "Привет! Я Джуси — помощник парка «Джунгли Сити» 🐒🌴\n"
-                "Могу подсказать:\n"
-                "• адрес и как добраться\n"
-                "• график работы\n"
-                "• цены и билеты\n"
-                "• дни рождения/выпускные\n"
-                "• ресторан и меню\n"
-                "• правила посещения\n"
-                "\n"
-                "Напиши просто вопрос, например:\n"
-                "«Как до вас добраться?»\n"
-                "«Сколько стоит билет?»\n"
-                "«Хочу день рождения на 15 января, 8 детей по 6 лет»\n"
-                "\n"
-                "С чего начнём? 🙂"
-            )
+            answer_points = [
+                "Привет! Я Джуси — помощник парка «Джунгли Сити» 🐒🌴",
+                "Могу подсказать:\n• адрес и как добраться\n• график работы\n• цены и билеты\n• дни рождения/выпускные\n• ресторан и меню\n• правила посещения",
+                "Напиши просто вопрос, например:\n«Как до вас добраться?»\n«Сколько стоит билет?»\n«Хочу день рождения на 15 января, 8 детей по 6 лет»",
+                "С чего начнём? 🙂",
+            ]
 
         elif intent == "clarify":
-            text = (
-                "Ой, извини — я слишком сухо ответил 🙈\n"
-                "Напиши, что тебе нужно, как будто пишешь администратору: "
-                "«цены», «как добраться», «график», «день рождения», «меню», «правила».\n"
-                "Я сразу отвечу и дам ссылку, если надо."
-            )
+            answer_points = [
+                "Ой, извини — я слишком сухо ответил 🙈",
+                "Напиши, что тебе нужно, как будто пишешь администратору: «цены», «как добраться», «график», «день рождения», «меню», «правила».",
+                "Я сразу отвечу и дам ссылку, если надо.",
+            ]
 
         elif intent == "contacts":
-            chunks: list[str] = []
             if facts.location and facts.location.get("address_text"):
-                chunks.append(f"Адрес: {facts.location['address_text']}")
+                facts_payload["address_text"] = facts.location["address_text"]
+                answer_points.append(f"Адрес: {facts.location['address_text']}")
 
-            opening = facts.opening_hours_text
-            if opening:
-                chunks.append(f"Часы работы: {opening}")
+            if facts.opening_hours_text:
+                facts_payload["opening_hours_text"] = facts.opening_hours_text
+                answer_points.append(f"Часы работы: {facts.opening_hours_text}")
 
             transport_lines = [t["text"] for t in (facts.transport or []) if t.get("text")]
             if transport_lines:
-                chunks.append("Как добраться:")
-                chunks.extend([f"- {line}" for line in transport_lines[:2]])
+                facts_payload["transport"] = transport_lines[:2]
+                answer_points.append("Как добраться:")
+                answer_points.extend([f"- {line}" for line in transport_lines[:2]])
 
-            phone = facts.primary_phone
-            if phone:
-                chunks.append(f"Телефон: {phone}")
+            if facts.primary_phone:
+                facts_payload["primary_phone"] = facts.primary_phone
+                answer_points.append(f"Телефон: {facts.primary_phone}")
 
-            text = "\n".join(chunks) if chunks else "Подскажите, что именно из контактов нужно: адрес или телефон?"
+            if not answer_points:
+                answer_points.append("Подскажите, что именно из контактов нужно: адрес или телефон?")
 
         elif intent == "rules":
-            if rag_chunks:
-                text = self._summarize_chunks(rag_chunks)
+            if rag_snippets:
+                answer_points.extend(rag_snippets[:2])
             else:
-                text = "У нас есть правила посещения (безопасность, возрастные ограничения и т.п.). Подробности на странице."
+                answer_points.append("У нас есть правила посещения (безопасность, возрастные ограничения и т.п.). Подробности на странице.")
 
         elif intent in {"prices_tickets", "prices_vr", "promotions", "gift_cards"}:
-            text = "Подробная информация по этому вопросу — на странице."
+            answer_points.append("Подробная информация по этому вопросу — на странице.")
             t = normalize_text(user_message)
             if intent in {"prices_tickets", "promotions"} and not any(
                 w in t
@@ -133,24 +164,26 @@ class Composer:
 
         elif intent in {"party_main", "graduation", "new_year_trees"}:
             text, questions = self._compose_lead(intent=intent, lead=lead, missing_slots=missing_slots or [])
+            answer_points.append(text)
 
         elif intent == "handoff":
             if handoff_created:
-                text = "Спасибо! Передала запрос менеджеру, с вами свяжутся по указанному номеру."
+                answer_points.append("Спасибо! Передала запрос менеджеру, с вами свяжутся по указанному номеру.")
             else:
-                text = "Поняла. Чтобы передать менеджеру и уточнить детали, напишите номер телефона для связи."
+                answer_points.append("Поняла. Чтобы передать менеджеру и уточнить детали, напишите номер телефона для связи.")
                 questions.append("Напишите, пожалуйста, номер телефона для связи.")
 
         elif intent in {"poster", "attractions", "restaurant"}:
-            if rag_chunks:
-                text = self._summarize_chunks(rag_chunks)
+            if rag_snippets:
+                txt = "\n".join(rag_snippets[:2])
                 if intent == "restaurant":
-                    text = self._restaurant_safe(text)
+                    txt = self._restaurant_safe(txt)
+                answer_points.append(txt)
             else:
-                text = "Подробности и актуальная информация — на странице."
+                answer_points.append("Подробности и актуальная информация — на странице.")
 
         else:
-            text = (
+            answer_points.append(
                 "Понял! Чтобы помочь точнее — это про:\n"
                 "• цены/билеты\n"
                 "• как добраться/контакты\n"
@@ -162,14 +195,35 @@ class Composer:
             )
             questions.append("Что именно интересует?")
 
-        reply = self._with_single_link(text, link_url)
-        return ComposedAnswer(
-            reply=reply,
-            questions=questions[:2],
-            link_url=link_url,
-            admin_message=admin_message,
-            rag_used=rag_used,
-        )
+        return {
+            "intent": intent,
+            "facts": facts_payload,
+            "rag_snippets": rag_snippets[:3],
+            "answer_points": [p for p in answer_points if p],
+            "questions": questions[:2],
+            "link": link_url,
+            "constraints": {
+                "max_questions": 2,
+                "max_links": 1,
+                "no_prices_unless_facts": True,
+                "no_currency_from_rag": True,
+            },
+        }
+
+    def render_from_plan(self, plan: dict[str, Any]) -> str:
+        points = plan.get("answer_points") or []
+        if not isinstance(points, list):
+            points = []
+        text = "\n".join([str(p).strip() for p in points if str(p).strip()])
+
+        questions = plan.get("questions") or []
+        if isinstance(questions, list) and questions:
+            q_lines = [str(q).strip() for q in questions if str(q).strip()]
+            if q_lines:
+                text = f"{text}\n" + "\n".join(q_lines[:2])
+
+        link_url = plan.get("link") if isinstance(plan.get("link"), str) else None
+        return self._with_single_link(text, link_url)
 
     def _compose_lead(self, *, intent: str, lead: Lead | None, missing_slots: list[str]) -> tuple[str, list[str]]:
         intro = {
@@ -250,6 +304,17 @@ class Composer:
         if not parts:
             return "Подробности и актуальная информация — на странице."
         return "\n".join(parts[:2])
+
+    def _snippets_from_chunks(self, chunks: list[RetrievedChunk]) -> list[str]:
+        parts: list[str] = []
+        for c in chunks[:3]:
+            snippet = (c.chunk_text or "").strip().replace("\n", " ")
+            snippet = " ".join(snippet.split())
+            if len(snippet) > 420:
+                snippet = snippet[:420].rsplit(" ", 1)[0] + "…"
+            if snippet:
+                parts.append(snippet)
+        return parts
 
     def _restaurant_safe(self, text: str) -> str:
         from app.domain.patterns import MONEY_WITH_CURRENCY_RE, PRICE_WORD_NUMBER_RE

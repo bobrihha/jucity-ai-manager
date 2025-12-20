@@ -14,6 +14,7 @@ from app.repos.event_log_repo import EventLogRepo
 from app.repos.facts_repo import FactsRepo
 from app.repos.leads_repo import LeadsRepo, lead_to_dict
 from app.services.rag_service import RAGService
+from app.services.llm_service import render_text as llm_render_text
 from app.services.telegram_notifications import notify_admins_telegram
 from app.utils import mask_phones
 from app.config import settings
@@ -264,20 +265,62 @@ class ChatService:
             facts_version_id=published_version_id,
         )
 
-        composed = self._composer.compose(
+        draft_plan = self._composer.build_plan(
             intent=route.intent,
             facts=facts,
             link_url=link_url,
-            user_message=req.message,
+            user_message=mask_phones(req.message),
             lead=lead,
             missing_slots=missing_slots,
             handoff_created=handoff_created,
             admin_message=admin_message,
             rag_chunks=rag_chunks if use_rag else None,
         )
+        draft_text = self._composer.render_from_plan(draft_plan)
+
+        final_text = draft_text
+        llm_ok = False
+        if settings.llm_enabled:
+            try:
+                t0 = time.monotonic()
+                rendered = await llm_render_text(
+                    draft_plan,
+                    channel=ctx.channel,
+                    voice=settings.brand_voice or "jucity_nn",
+                )
+                llm_ok = True
+                await self._event_log.write_event(
+                    trace_id=ctx.trace_id,
+                    session_id=ctx.session_id,
+                    user_id=ctx.user_id,
+                    park_id=ctx.park_id,
+                    park_slug=ctx.park_slug,
+                    channel=ctx.channel,
+                    event_name="llm_rendered",
+                    payload={
+                        "provider": rendered.provider,
+                        "model": rendered.model,
+                        "latency_ms": rendered.latency_ms or int((time.monotonic() - t0) * 1000),
+                    },
+                    facts_version_id=published_version_id,
+                )
+                final_text = rendered.text
+            except Exception as e:
+                await self._event_log.write_event(
+                    trace_id=ctx.trace_id,
+                    session_id=ctx.session_id,
+                    user_id=ctx.user_id,
+                    park_id=ctx.park_id,
+                    park_slug=ctx.park_slug,
+                    channel=ctx.channel,
+                    event_name="llm_failed",
+                    payload={"error": str(e), "provider": settings.llm_provider, "model": settings.llm_model},
+                    facts_version_id=published_version_id,
+                )
+                final_text = draft_text
 
         safe_reply, safety_guard_applied, rag_conflict_detected = apply_guardrails(
-            reply=composed.reply,
+            reply=final_text,
             intent=route.intent,
             rag_used=rag_used,
         )
@@ -304,12 +347,13 @@ class ChatService:
             event_name="answer_composed",
             payload={
                 "reply_length": len(safe_reply),
-                "questions": composed.questions,
-                "link": composed.link_url,
+                "questions": list(draft_plan.get("questions") or [])[:2],
+                "link": link_url,
                 "missing_slots": missing_slots,
                 "pii_masking_applied": True if missing_slots else False,
                 "rag_used": rag_used,
                 "safety_guard_applied": safety_guard_applied,
+                "llm_used": llm_ok,
             },
             facts_version_id=published_version_id,
         )
