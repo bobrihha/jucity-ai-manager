@@ -8,11 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import ChatMessageRequest, ChatMessageResponse
 from app.domain.composer import Composer
+from app.domain.extraction.profile import extract_name
 from app.domain.extraction.slots import SlotsPatch, extract_slots, mask_phone
 from app.domain.router import Router
 from app.repos.event_log_repo import EventLogRepo
 from app.repos.facts_repo import FactsRepo
 from app.repos.leads_repo import LeadsRepo, lead_to_dict
+from app.repos.user_profiles_repo import UserProfilesRepo
 from app.services.rag_service import RAGService
 from app.services.llm_service import render_text as llm_render_text
 from app.services.telegram_notifications import notify_admins_telegram
@@ -39,6 +41,7 @@ class ChatService:
         self._router = Router()
         self._composer = Composer()
         self._rag = RAGService(session)
+        self._profiles_repo = UserProfilesRepo(session)
 
     async def handle_message(self, req: ChatMessageRequest) -> ChatMessageResponse:
         trace_id = uuid4()
@@ -57,6 +60,32 @@ class ChatService:
             channel=req.channel,
             user_id=req.user_id,
         )
+
+        # User profile memory (name + short summary).
+        name_just_set = False
+        user_name_for_greeting: str | None = None
+        if ctx.user_id:
+            extracted = extract_name(req.message)
+            if extracted:
+                await self._profiles_repo.upsert(
+                    park_id=ctx.park_id,
+                    channel=ctx.channel,
+                    user_key=ctx.user_id,
+                    name=extracted,
+                )
+                name_just_set = True
+            await self._profiles_repo.set_summary(
+                park_id=ctx.park_id,
+                channel=ctx.channel,
+                user_key=ctx.user_id,
+                summary=mask_phones(req.message)[:160],
+            )
+            if not name_just_set:
+                profile = await self._profiles_repo.get(park_id=ctx.park_id, channel=ctx.channel, user_key=ctx.user_id)
+                if profile and profile.name:
+                    already_used = await self._event_log.has_event_in_session(ctx.session_id, "name_used")
+                    if not already_used:
+                        user_name_for_greeting = profile.name
 
         await self._event_log.write_event(
             trace_id=ctx.trace_id,
@@ -276,6 +305,11 @@ class ChatService:
             admin_message=admin_message,
             rag_chunks=rag_chunks if use_rag else None,
         )
+
+        name_used_now = False
+        if user_name_for_greeting and isinstance(draft_plan.get("answer_points"), list):
+            draft_plan["answer_points"].insert(0, f"Ок, {user_name_for_greeting} 🙂")
+            name_used_now = True
         draft_text = self._composer.render_from_plan(draft_plan)
 
         final_text = draft_text
@@ -319,11 +353,26 @@ class ChatService:
                 )
                 final_text = draft_text
 
+        if name_used_now and user_name_for_greeting and user_name_for_greeting not in final_text:
+            final_text = f"Ок, {user_name_for_greeting} 🙂\n{final_text}"
+
         safe_reply, safety_guard_applied, rag_conflict_detected = apply_guardrails(
             reply=final_text,
             intent=route.intent,
             rag_used=rag_used,
         )
+        if name_used_now and user_name_for_greeting and user_name_for_greeting in safe_reply:
+            await self._event_log.write_event(
+                trace_id=ctx.trace_id,
+                session_id=ctx.session_id,
+                user_id=ctx.user_id,
+                park_id=ctx.park_id,
+                park_slug=ctx.park_slug,
+                channel=ctx.channel,
+                event_name="name_used",
+                payload={"name": user_name_for_greeting},
+                facts_version_id=published_version_id,
+            )
         if rag_conflict_detected:
             await self._event_log.write_event(
                 trace_id=ctx.trace_id,

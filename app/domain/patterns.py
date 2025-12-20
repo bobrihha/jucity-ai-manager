@@ -19,6 +19,16 @@ AGE_RE = re.compile(r"(?P<n>\d{1,2})\s*(?:лет|года|год|л\b)")
 NAS_COUNT_RE = re.compile(r"\bнас\s+(?P<n>\d{1,2})\b")
 TIME_WORD_DAY_RE = re.compile(r"\bв\s*(?P<h>\d{1,2})\s*дня\b")
 
+NAME_INTRO_RE = re.compile(
+    r"\bменя\s+зовут\s+(?P<name>[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё-]{1,40})\b",
+    re.IGNORECASE,
+)
+
+NAME_I_AM_RE = re.compile(
+    r"^\s*я\s+(?P<name>[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё-]{1,40})\s*$",
+    re.IGNORECASE,
+)
+
 MONEY_WITH_CURRENCY_RE = re.compile(
     r"\b\d[\d\s]*(?:[.,]\d+)?\s*(?:₽|руб\.?|р\.|рублей|рубля)(?!\w)",
     re.IGNORECASE,

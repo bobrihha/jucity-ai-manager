@@ -12,6 +12,20 @@ class EventLogRepo:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def count_session_events(self, session_id: UUID) -> int:
+        result = await self._session.execute(
+            text("SELECT count(*) FROM event_log WHERE session_id = :session_id"),
+            {"session_id": session_id},
+        )
+        return int(result.scalar() or 0)
+
+    async def has_event_in_session(self, session_id: UUID, event_name: str) -> bool:
+        result = await self._session.execute(
+            text("SELECT 1 FROM event_log WHERE session_id = :session_id AND event_name = :event_name LIMIT 1"),
+            {"session_id": session_id, "event_name": event_name},
+        )
+        return bool(result.scalar())
+
     async def write_event(
         self,
         *,
